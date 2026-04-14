@@ -1,19 +1,46 @@
 {
   "name": "can-see",
   "version": "0.1.0",
-  "description": "MCP server that lets Claude Code see and interact with terminal apps",
+  "description": "MCP server that lets AI agents see and interact with terminal/CLI apps via virtual terminals and PNG screenshots",
   "type": "module",
   "main": "dist/server.js",
   "bin": {
     "can-see": "dist/server.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "prepublishOnly": "npm run build && npm test"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HurleySk/can-see.git"
+  },
+  "homepage": "https://github.com/HurleySk/can-see",
+  "bugs": {
+    "url": "https://github.com/HurleySk/can-see/issues"
+  },
+  "author": "Samuel Hurley <sk.hurley@gmail.com>",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "terminal",
+    "tui",
+    "cli",
+    "screenshot",
+    "claude",
+    "ai-agent",
+    "node-pty",
+    "xterm"
+  ],
   "engines": {
     "node": ">=18"
   },
