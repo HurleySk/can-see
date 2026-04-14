@@ -2,50 +2,13 @@ import xtermHeadless from "@xterm/headless";
 const { Terminal } = xtermHeadless;
 type Terminal = InstanceType<typeof Terminal>;
 import { createCanvas } from "canvas";
+import { ANSI_COLORS, DEFAULT_BG, DEFAULT_FG, paletteColor, rgbColor } from "./colors.js";
 
 const CELL_WIDTH = 9;
 const CELL_HEIGHT = 18;
 const FONT_SIZE = 14;
 const FONT_FAMILY = "monospace";
 const PADDING = 8;
-
-const ANSI_COLORS: string[] = [
-  "#000000", "#cd0000", "#00cd00", "#cdcd00",
-  "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
-  "#7f7f7f", "#ff0000", "#00ff00", "#ffff00",
-  "#5c5cff", "#ff00ff", "#00ffff", "#ffffff",
-];
-
-const DEFAULT_BG = "#1e1e1e";
-const DEFAULT_FG = "#cccccc";
-
-function paletteColor(index: number): string {
-  if (index >= 0 && index <= 15) {
-    return ANSI_COLORS[index];
-  }
-
-  if (index >= 16 && index <= 231) {
-    const idx = index - 16;
-    const r = Math.floor(idx / 36);
-    const g = Math.floor((idx % 36) / 6);
-    const b = idx % 6;
-    return `rgb(${r ? r * 40 + 55 : 0}, ${g ? g * 40 + 55 : 0}, ${b ? b * 40 + 55 : 0})`;
-  }
-
-  if (index >= 232 && index <= 255) {
-    const level = (index - 232) * 10 + 8;
-    return `rgb(${level}, ${level}, ${level})`;
-  }
-
-  return DEFAULT_FG;
-}
-
-function rgbColor(value: number): string {
-  const r = (value >> 16) & 0xff;
-  const g = (value >> 8) & 0xff;
-  const b = value & 0xff;
-  return `rgb(${r}, ${g}, ${b})`;
-}
 
 export function renderTerminal(terminal: Terminal): Buffer {
   const cols = terminal.cols;
