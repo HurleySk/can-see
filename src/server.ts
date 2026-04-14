@@ -5,6 +5,7 @@ import { z } from "zod";
 import { SessionManager } from "./session-manager.js";
 import { resolveKeys } from "./keys.js";
 import { DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_IDLE_TIMEOUT_MS } from "./types.js";
+import { parseColor } from "./colors.js";
 
 export function createServer(): McpServer {
   const cols = parseInt(process.env.DEFAULT_COLS ?? "", 10) || DEFAULT_COLS;
@@ -16,7 +17,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "can-see",
-      version: "0.2.0",
+      version: "0.3.0",
     },
     {
       instructions: [
@@ -24,17 +25,20 @@ export function createServer(): McpServer {
         "",
         "Workflow:",
         "1. launch — start the app",
-        "2. wait_for_text / wait_for_idle — wait for the app to be ready (preferred over arbitrary delays)",
-        "3. screenshot or read_text — see what's on screen",
-        "4. send_keys / send_text — interact with the app",
-        "5. wait_for_text / wait_for_idle — wait for the result",
-        "6. screenshot or read_text — see the result",
-        "7. close — ALWAYS close sessions when you're done. Do not leave sessions running.",
+        "2. wait_for_text / wait_for_idle / wait_for_color — wait for the app to be ready",
+        "3. screenshot, screenshot_region, or read_text — see what's on screen",
+        "4. get_cell_info — check specific colors/attributes if needed",
+        "5. send_keys / send_text — interact with the app",
+        "6. wait_for_text / wait_for_idle / wait_for_color — wait for the result",
+        "7. diff_screenshot — see what changed (if baseline was captured)",
+        "8. close — ALWAYS close sessions when you're done. Do not leave sessions running.",
         "",
-        "IMPORTANT: Every launch MUST have a matching close. When you finish debugging, testing, or inspecting an app, close all sessions you opened.",
+        "Use start_recording/stop_recording to capture an animated GIF of a workflow.",
+        "Use read_scrollback to see output that scrolled above the visible area.",
+        "Use capture_baseline before interactions, then diff_screenshot to see what changed.",
+        "",
+        "IMPORTANT: Every launch MUST have a matching close.",
         "Sessions auto-close after 5 minutes of inactivity as a safety net, but do not rely on this — close explicitly.",
-        "",
-        "Prefer wait_for_text/wait_for_idle over arbitrary sleeps. Prefer read_text over screenshot when you only need to check text content.",
       ].join("\n"),
     }
   );
@@ -94,6 +98,170 @@ export function createServer(): McpServer {
         }
 
         return { content };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "screenshot_region",
+    "Capture a specific rectangular area of the visible terminal as a PNG image",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      startRow: z.number().describe("Top row, 0-based (default: 0)"),
+      startCol: z.number().describe("Left column, 0-based (default: 0)"),
+      endRow: z.number().describe("Bottom row, exclusive (default: terminal rows)"),
+      endCol: z.number().describe("Right column, exclusive (default: terminal cols)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const png = session.screenshotRegion(params.startRow, params.startCol, params.endRow, params.endCol);
+        return {
+          content: [{
+            type: "image" as const,
+            data: png.toString("base64"),
+            mimeType: "image/png",
+          }],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "capture_baseline",
+    "Snapshot current terminal state for later diff comparison (screenshot also auto-captures a baseline)",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const info = session.captureBaseline();
+        return { content: [{ type: "text" as const, text: `Baseline captured (${info.cols}x${info.rows}, ${info.cells} cells)` }] };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "diff_screenshot",
+    "Compare current terminal state against the baseline, return PNG with changed cells highlighted in red",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const result = session.diffBaseline();
+        const content: Array<{ type: "image"; data: string; mimeType: string } | { type: "text"; text: string }> = [
+          {
+            type: "image" as const,
+            data: result.png.toString("base64"),
+            mimeType: "image/png",
+          },
+          {
+            type: "text" as const,
+            text: result.summary,
+          },
+        ];
+        return { content };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "get_cell_info",
+    "Query character, colors, and text attributes at a specific cell or range of cells",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      row: z.number().describe("Row, 0-based, viewport-relative"),
+      col: z.number().describe("Column, 0-based"),
+      endCol: z.number().optional().describe("End column (exclusive) for range query"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const info = session.getCellInfo(params.row, params.col, params.endCol);
+        return { content: [{ type: "text" as const, text: JSON.stringify(info, null, 2) }] };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "read_scrollback",
+    "Read text that has scrolled above the visible terminal viewport",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      lines: z.number().optional().describe("Number of lines from bottom of scrollback (default: 100)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const text = session.getScrollbackText(params.lines);
+        if (text === "") {
+          return { content: [{ type: "text" as const, text: "No scrollback content available" }] };
+        }
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "start_recording",
+    "Begin capturing terminal frames for an animated GIF (frames captured on output, not fixed interval)",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      minIntervalMs: z.number().optional().describe("Minimum ms between frames (default: 100)"),
+      maxDurationMs: z.number().optional().describe("Auto-stop after this many ms (default: 60000)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const minInterval = params.minIntervalMs ?? 100;
+        const maxDuration = params.maxDurationMs ?? 60_000;
+        session.startRecording(minInterval, maxDuration);
+        return { content: [{ type: "text" as const, text: `Recording started (output-triggered, min interval ${minInterval}ms, max ${maxDuration / 1000}s)` }] };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "stop_recording",
+    "Stop recording and return the captured frames as an animated GIF",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const gif = session.stopRecording();
+        return {
+          content: [{
+            type: "image" as const,
+            data: gif.toString("base64"),
+            mimeType: "image/gif",
+          }],
+        };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         return { content: [{ type: "text" as const, text: message }], isError: true };
@@ -205,6 +373,50 @@ export function createServer(): McpServer {
 
         return {
           content: [{ type: "text" as const, text: `Timed out after ${timeout}ms waiting for ${idleMs}ms of idle` }],
+          isError: true,
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "wait_for_color",
+    "Wait until a specific color appears at a position (or anywhere in the viewport)",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      color: z.string().describe("Color to wait for: hex (#ff0000) or ANSI name (red, bright-green)"),
+      row: z.number().optional().describe("Specific row to check (viewport-relative)"),
+      col: z.number().optional().describe("Specific column to check"),
+      target: z.enum(["fg", "bg"]).optional().describe("Check foreground or background color (default: fg)"),
+      timeoutMs: z.number().optional().describe("Timeout in milliseconds (default: 30000)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const targetHex = parseColor(params.color);
+        const colorTarget = params.target ?? "fg";
+        const timeout = params.timeoutMs ?? 30_000;
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+          const found = session.findColor(targetHex, colorTarget, params.row, params.col);
+          if (found) {
+            return { content: [{ type: "text" as const, text: `Found ${params.color} (${targetHex}) at row ${found.row}, col ${found.col} after ${Date.now() - start}ms` }] };
+          }
+          if (session.getInfo().status === "exited") {
+            return {
+              content: [{ type: "text" as const, text: `Process exited before color "${params.color}" appeared` }],
+              isError: true,
+            };
+          }
+          await new Promise((r) => setTimeout(r, 100));
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Timed out after ${timeout}ms waiting for color "${params.color}"` }],
           isError: true,
         };
       } catch (err: unknown) {
