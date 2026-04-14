@@ -98,6 +98,104 @@ export function createServer(): McpServer {
   );
 
   server.tool(
+    "read_text",
+    "Read the terminal buffer as plain text (for programmatic assertions instead of visual screenshots)",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const text = session.getBufferText();
+        const info = session.getInfo();
+
+        const content: Array<{ type: "text"; text: string }> = [
+          { type: "text" as const, text },
+        ];
+
+        if (info.status === "exited") {
+          content.push({
+            type: "text" as const,
+            text: `Process exited with code ${info.exitCode}${info.signal ? ` (signal: ${info.signal})` : ""}`,
+          });
+        }
+
+        return { content };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "wait_for_text",
+    "Wait until specific text appears in the terminal buffer (replaces sleep-and-screenshot polling)",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      text: z.string().describe("Text to wait for (substring match)"),
+      timeoutMs: z.number().optional().describe("Timeout in milliseconds (default: 30000)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const timeout = params.timeoutMs ?? 30_000;
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+          if (session.getBufferText().includes(params.text)) {
+            return { content: [{ type: "text" as const, text: `Found "${params.text}" after ${Date.now() - start}ms` }] };
+          }
+          await new Promise((r) => setTimeout(r, 100));
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Timed out after ${timeout}ms waiting for "${params.text}"` }],
+          isError: true,
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "wait_for_idle",
+    "Wait until terminal output has been stable for a given duration (use after send_keys when you don't know what text to expect)",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      idleMs: z.number().optional().describe("Required idle duration in ms (default: 500)"),
+      timeoutMs: z.number().optional().describe("Timeout in milliseconds (default: 30000)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const idleMs = params.idleMs ?? 500;
+        const timeout = params.timeoutMs ?? 30_000;
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+          const elapsed = Date.now() - session.getLastOutput();
+          if (elapsed >= idleMs) {
+            return { content: [{ type: "text" as const, text: `Terminal idle for ${elapsed}ms (waited ${Date.now() - start}ms total)` }] };
+          }
+          const remaining = idleMs - elapsed;
+          await new Promise((r) => setTimeout(r, Math.min(remaining, 100)));
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Timed out after ${timeout}ms waiting for ${idleMs}ms of idle` }],
+          isError: true,
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
     "send_keys",
     "Send keystrokes to the app (e.g., 'Enter', 'Ctrl+C', ['Down', 'Down', 'Enter'])",
     {
