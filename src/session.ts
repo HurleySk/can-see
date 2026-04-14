@@ -1,4 +1,6 @@
-import { Terminal } from "@xterm/headless";
+import xtermHeadless from "@xterm/headless";
+const { Terminal } = xtermHeadless;
+type Terminal = InstanceType<typeof Terminal>;
 import * as pty from "node-pty";
 import { v4 as uuidv4 } from "uuid";
 import { execFileSync } from "child_process";

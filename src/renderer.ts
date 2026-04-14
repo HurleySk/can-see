@@ -1,4 +1,6 @@
-import { Terminal } from "@xterm/headless";
+import xtermHeadless from "@xterm/headless";
+const { Terminal } = xtermHeadless;
+type Terminal = InstanceType<typeof Terminal>;
 import { createCanvas } from "canvas";
 
 const CELL_WIDTH = 9;
