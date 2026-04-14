@@ -4,19 +4,35 @@ type Terminal = InstanceType<typeof Terminal>;
 import { createCanvas } from "canvas";
 import { ANSI_COLORS, DEFAULT_BG, DEFAULT_FG, paletteColor, rgbColor } from "./colors.js";
 
-const CELL_WIDTH = 9;
-const CELL_HEIGHT = 18;
+export const CELL_WIDTH = 9;
+export const CELL_HEIGHT = 18;
 const FONT_SIZE = 14;
 const FONT_FAMILY = "monospace";
-const PADDING = 8;
+export const PADDING = 8;
 
-export function renderTerminal(terminal: Terminal): Buffer {
+export interface RenderOptions {
+  startRow?: number;
+  endRow?: number;
+  startCol?: number;
+  endCol?: number;
+  highlights?: Map<string, string>; // "row,col" → CSS color for overlay
+}
+
+export function renderTerminal(terminal: Terminal, options: RenderOptions = {}): Buffer {
   const cols = terminal.cols;
   const rows = terminal.rows;
   const buffer = terminal.buffer.active;
 
-  const canvasWidth = cols * CELL_WIDTH + PADDING * 2;
-  const canvasHeight = rows * CELL_HEIGHT + PADDING * 2;
+  const startRow = options.startRow ?? 0;
+  const endRow = options.endRow ?? rows;
+  const startCol = options.startCol ?? 0;
+  const endCol = options.endCol ?? cols;
+
+  const regionCols = endCol - startCol;
+  const regionRows = endRow - startRow;
+
+  const canvasWidth = regionCols * CELL_WIDTH + PADDING * 2;
+  const canvasHeight = regionRows * CELL_HEIGHT + PADDING * 2;
 
   const canvas = createCanvas(canvasWidth, canvasHeight);
   const ctx = canvas.getContext("2d");
@@ -26,17 +42,17 @@ export function renderTerminal(terminal: Terminal): Buffer {
 
   ctx.textBaseline = "top";
 
-  for (let row = 0; row < rows; row++) {
+  for (let row = startRow; row < endRow; row++) {
     const line = buffer.getLine(row);
     if (!line) continue;
 
-    for (let col = 0; col < cols; col++) {
+    for (let col = startCol; col < endCol; col++) {
       const cell = line.getCell(col);
       if (!cell) continue;
 
       const char = cell.getChars();
-      const x = PADDING + col * CELL_WIDTH;
-      const y = PADDING + row * CELL_HEIGHT;
+      const x = PADDING + (col - startCol) * CELL_WIDTH;
+      const y = PADDING + (row - startRow) * CELL_HEIGHT;
 
       const isBold = !!cell.isBold();
       const isItalic = !!cell.isItalic();
@@ -79,15 +95,26 @@ export function renderTerminal(terminal: Terminal): Buffer {
         ctx.fillStyle = fg;
         ctx.fillText(char, x, y + 2);
       }
+
+      // Draw highlight overlay if present
+      const highlight = options.highlights?.get(`${row},${col}`);
+      if (highlight) {
+        ctx.fillStyle = highlight;
+        ctx.fillRect(x, y, CELL_WIDTH, CELL_HEIGHT);
+      }
     }
   }
 
-  const cursorX = PADDING + buffer.cursorX * CELL_WIDTH;
-  const cursorY = PADDING + buffer.cursorY * CELL_HEIGHT;
-  ctx.fillStyle = DEFAULT_FG;
-  ctx.globalAlpha = 0.6;
-  ctx.fillRect(cursorX, cursorY, CELL_WIDTH, CELL_HEIGHT);
-  ctx.globalAlpha = 1.0;
+  // Draw cursor only if within region
+  if (buffer.cursorY >= startRow && buffer.cursorY < endRow &&
+      buffer.cursorX >= startCol && buffer.cursorX < endCol) {
+    const cursorX = PADDING + (buffer.cursorX - startCol) * CELL_WIDTH;
+    const cursorY = PADDING + (buffer.cursorY - startRow) * CELL_HEIGHT;
+    ctx.fillStyle = DEFAULT_FG;
+    ctx.globalAlpha = 0.6;
+    ctx.fillRect(cursorX, cursorY, CELL_WIDTH, CELL_HEIGHT);
+    ctx.globalAlpha = 1.0;
+  }
 
   return canvas.toBuffer("image/png");
 }

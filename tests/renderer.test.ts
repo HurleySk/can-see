@@ -55,4 +55,25 @@ describe("renderTerminal", () => {
     expect(png[0]).toBe(0x89);
     expect(png.length).toBeGreaterThan(0);
   });
+
+  it("renders a sub-region with smaller dimensions", async () => {
+    await writeSync(terminal, "Hello, world!");
+    const full = renderTerminal(terminal);
+    const region = renderTerminal(terminal, { startRow: 0, endRow: 5, startCol: 0, endCol: 20 });
+    expect(region.length).toBeLessThan(full.length);
+    // Region PNG has smaller dimensions
+    const fullWidth = full.readUInt32BE(16);
+    const regionWidth = region.readUInt32BE(16);
+    expect(regionWidth).toBeLessThan(fullWidth);
+  });
+
+  it("renders with highlight overlays", async () => {
+    await writeSync(terminal, "Hello");
+    const highlights = new Map([["0,0", "rgba(255,0,0,0.5)"]]);
+    const png = renderTerminal(terminal, { highlights });
+    expect(png[0]).toBe(0x89); // valid PNG
+    // Highlighted image should differ from non-highlighted
+    const plain = renderTerminal(terminal);
+    expect(Buffer.compare(png, plain)).not.toBe(0);
+  });
 });
