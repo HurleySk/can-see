@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.HurleySk/can-see",
+  "description": "Let AI agents see and interact with terminal/CLI apps via PNG screenshots",
+  "repository": {
+    "url": "https://github.com/HurleySk/can-see",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "can-see",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Terminal width in columns (default: 120)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "DEFAULT_COLS"
+        },
+        {
+          "description": "Terminal height in rows (default: 30)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "DEFAULT_ROWS"
+        },
+        {
+          "description": "Auto-close idle sessions after this many milliseconds (default: 300000)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "IDLE_TIMEOUT_MS"
+        }
+      ]
+    }
+  ]
+}
