@@ -69,9 +69,17 @@ Or if installed globally:
 |------|-------------|
 | `launch` | Start a CLI app in a virtual terminal. Returns a `sessionId`. |
 | `screenshot` | Capture the terminal as a PNG image. |
-| `read_text` | Read the terminal buffer as plain text (for programmatic checks). |
+| `screenshot_region` | Capture a specific rectangular area of the terminal. |
+| `capture_baseline` | Snapshot terminal state for later diff comparison. |
+| `diff_screenshot` | Compare current state against baseline with highlighted changes. |
+| `get_cell_info` | Query character, colors, and attributes at specific cell(s). |
+| `read_text` | Read the terminal buffer as plain text. |
+| `read_scrollback` | Read text that scrolled above the visible viewport. |
 | `wait_for_text` | Wait until specific text appears in the terminal buffer. |
 | `wait_for_idle` | Wait until terminal output has been stable for a given duration. |
+| `wait_for_color` | Wait until a specific color appears at a position. |
+| `start_recording` | Begin capturing frames for an animated GIF. |
+| `stop_recording` | Stop recording and return the animated GIF. |
 | `send_keys` | Send keystrokes (e.g., `Enter`, `Ctrl+C`, `['Down', 'Down', 'Enter']`). |
 | `send_text` | Type a string of text into the app. |
 | `list_sessions` | List all active terminal sessions. |
