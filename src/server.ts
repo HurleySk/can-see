@@ -17,7 +17,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "can-see",
-      version: "0.3.0",
+      version: "0.3.1",
     },
     {
       instructions: [
