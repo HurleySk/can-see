@@ -147,8 +147,15 @@ export function createServer(): McpServer {
         const start = Date.now();
 
         while (Date.now() - start < timeout) {
-          if (session.getBufferText().includes(params.text)) {
+          const bufferText = session.getBufferText();
+          if (bufferText.includes(params.text)) {
             return { content: [{ type: "text" as const, text: `Found "${params.text}" after ${Date.now() - start}ms` }] };
+          }
+          if (session.getInfo().status === "exited") {
+            return {
+              content: [{ type: "text" as const, text: `Process exited before "${params.text}" appeared` }],
+              isError: true,
+            };
           }
           await new Promise((r) => setTimeout(r, 100));
         }
@@ -183,6 +190,14 @@ export function createServer(): McpServer {
           const elapsed = Date.now() - session.getLastOutput();
           if (elapsed >= idleMs) {
             return { content: [{ type: "text" as const, text: `Terminal idle for ${elapsed}ms (waited ${Date.now() - start}ms total)` }] };
+          }
+          if (session.getInfo().status === "exited") {
+            // Process exited — check one more time if idle threshold is met
+            const finalElapsed = Date.now() - session.getLastOutput();
+            if (finalElapsed >= idleMs) {
+              return { content: [{ type: "text" as const, text: `Terminal idle for ${finalElapsed}ms (process exited)` }] };
+            }
+            return { content: [{ type: "text" as const, text: `Process exited (idle ${finalElapsed}ms, needed ${idleMs}ms)` }] };
           }
           const remaining = idleMs - elapsed;
           await new Promise((r) => setTimeout(r, Math.min(remaining, 100)));

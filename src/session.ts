@@ -99,6 +99,7 @@ export class Session {
   }
 
   getBufferText(): string {
+    this.lastActivity = Date.now();
     const buffer = this.terminal.buffer.active;
     const lines: string[] = [];
     for (let i = 0; i < buffer.length; i++) {
