@@ -1,0 +1,35 @@
+{
+  "name": "can-see",
+  "version": "0.1.0",
+  "description": "MCP server that lets Claude Code see and interact with terminal apps",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "can-see": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xterm/headless": "^6.0.0",
+    "canvas": "^3.2.3",
+    "node-pty": "^1.1.0",
+    "uuid": "^13.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  }
+}
