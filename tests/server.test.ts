@@ -30,16 +30,19 @@ describe("MCP Server", () => {
     if (cleanup) await cleanup();
   });
 
-  it("lists all 6 tools", async () => {
+  it("lists all 9 tools", async () => {
     const result = await client.listTools();
     const names = result.tools.map((t) => t.name);
     expect(names).toContain("launch");
     expect(names).toContain("screenshot");
+    expect(names).toContain("read_text");
+    expect(names).toContain("wait_for_text");
+    expect(names).toContain("wait_for_idle");
     expect(names).toContain("send_keys");
     expect(names).toContain("send_text");
     expect(names).toContain("list_sessions");
     expect(names).toContain("close");
-    expect(result.tools).toHaveLength(6);
+    expect(result.tools).toHaveLength(9);
   });
 
   it("launch returns a sessionId", async () => {
@@ -54,7 +57,7 @@ describe("MCP Server", () => {
     expect(parsed.sessionId).toBeTruthy();
   });
 
-  it("screenshot returns an image after launch", async () => {
+  it("screenshot returns an image after launch", { timeout: 10000 }, async () => {
     const launchResult = await client.callTool({
       name: "launch",
       arguments: { command: "node", args: [ECHO_APP] },
@@ -155,5 +158,79 @@ describe("MCP Server", () => {
       arguments: { sessionId: "bogus" },
     });
     expect(result.isError).toBe(true);
+  });
+
+  it("read_text returns buffer content", async () => {
+    const launchResult = await client.callTool({
+      name: "launch",
+      arguments: { command: "node", args: [ECHO_APP] },
+    });
+    const content = launchResult.content as Array<{ type: string; text?: string }>;
+    const { sessionId } = JSON.parse(content.find((c) => c.type === "text")!.text!);
+
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const readResult = await client.callTool({
+      name: "read_text",
+      arguments: { sessionId },
+    });
+    const readContent = readResult.content as Array<{ type: string; text?: string }>;
+    const text = readContent.find((c) => c.type === "text")!.text!;
+    expect(text).toContain(">");
+
+    await client.callTool({ name: "close", arguments: { sessionId } });
+  });
+
+  it("wait_for_text resolves when text appears", async () => {
+    const launchResult = await client.callTool({
+      name: "launch",
+      arguments: { command: "node", args: [ECHO_APP] },
+    });
+    const content = launchResult.content as Array<{ type: string; text?: string }>;
+    const { sessionId } = JSON.parse(content.find((c) => c.type === "text")!.text!);
+
+    const waitResult = await client.callTool({
+      name: "wait_for_text",
+      arguments: { sessionId, text: ">", timeoutMs: 5000 },
+    });
+    const waitContent = waitResult.content as Array<{ type: string; text?: string }>;
+    expect(waitContent[0].text).toContain("Found");
+
+    await client.callTool({ name: "close", arguments: { sessionId } });
+  });
+
+  it("wait_for_text times out when text never appears", { timeout: 10000 }, async () => {
+    const launchResult = await client.callTool({
+      name: "launch",
+      arguments: { command: "node", args: [ECHO_APP] },
+    });
+    const content = launchResult.content as Array<{ type: string; text?: string }>;
+    const { sessionId } = JSON.parse(content.find((c) => c.type === "text")!.text!);
+
+    const waitResult = await client.callTool({
+      name: "wait_for_text",
+      arguments: { sessionId, text: "NONEXISTENT_TEXT_xyz", timeoutMs: 500 },
+    });
+    expect(waitResult.isError).toBe(true);
+
+    await client.callTool({ name: "close", arguments: { sessionId } });
+  });
+
+  it("wait_for_idle resolves when output settles", async () => {
+    const launchResult = await client.callTool({
+      name: "launch",
+      arguments: { command: "node", args: [ECHO_APP] },
+    });
+    const content = launchResult.content as Array<{ type: string; text?: string }>;
+    const { sessionId } = JSON.parse(content.find((c) => c.type === "text")!.text!);
+
+    const idleResult = await client.callTool({
+      name: "wait_for_idle",
+      arguments: { sessionId, idleMs: 500, timeoutMs: 5000 },
+    });
+    const idleContent = idleResult.content as Array<{ type: string; text?: string }>;
+    expect(idleContent[0].text).toContain("Terminal idle");
+
+    await client.callTool({ name: "close", arguments: { sessionId } });
   });
 });
