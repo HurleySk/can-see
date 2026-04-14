@@ -69,6 +69,9 @@ Or if installed globally:
 |------|-------------|
 | `launch` | Start a CLI app in a virtual terminal. Returns a `sessionId`. |
 | `screenshot` | Capture the terminal as a PNG image. |
+| `read_text` | Read the terminal buffer as plain text (for programmatic checks). |
+| `wait_for_text` | Wait until specific text appears in the terminal buffer. |
+| `wait_for_idle` | Wait until terminal output has been stable for a given duration. |
 | `send_keys` | Send keystrokes (e.g., `Enter`, `Ctrl+C`, `['Down', 'Down', 'Enter']`). |
 | `send_text` | Type a string of text into the app. |
 | `list_sessions` | List all active terminal sessions. |
@@ -94,11 +97,17 @@ From an MCP-connected agent:
 Agent: I'll launch your app to see what's happening.
 → launch("node", ["app.js"])  → sessionId: "abc-123"
 
-Agent: Let me take a screenshot to see the current state.
-→ screenshot("abc-123")  → [PNG image of terminal]
+Agent: Let me wait for the app to start.
+→ wait_for_text("abc-123", "Ready")  → Found "Ready" after 1200ms
 
-Agent: I can see the menu. Let me select option 2.
+Agent: Let me read the current output.
+→ read_text("abc-123")  → "Welcome to MyApp\nReady\n> "
+
+Agent: I can see the prompt. Let me select option 2.
 → send_keys("abc-123", ["Down", "Enter"])
+
+Agent: Waiting for the screen to settle.
+→ wait_for_idle("abc-123")  → Terminal idle for 520ms
 
 Agent: Let me check the result.
 → screenshot("abc-123")  → [PNG image showing result]

@@ -16,7 +16,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "can-see",
-      version: "0.1.0",
+      version: "0.2.0",
     },
     {
       instructions: [
@@ -24,13 +24,17 @@ export function createServer(): McpServer {
         "",
         "Workflow:",
         "1. launch — start the app",
-        "2. screenshot — see what's on screen (wait ~500ms after launch or send_keys for output to settle)",
-        "3. send_keys / send_text — interact with the app",
-        "4. screenshot — see the result",
-        "5. close — ALWAYS close sessions when you're done. Do not leave sessions running.",
+        "2. wait_for_text / wait_for_idle — wait for the app to be ready (preferred over arbitrary delays)",
+        "3. screenshot or read_text — see what's on screen",
+        "4. send_keys / send_text — interact with the app",
+        "5. wait_for_text / wait_for_idle — wait for the result",
+        "6. screenshot or read_text — see the result",
+        "7. close — ALWAYS close sessions when you're done. Do not leave sessions running.",
         "",
         "IMPORTANT: Every launch MUST have a matching close. When you finish debugging, testing, or inspecting an app, close all sessions you opened.",
         "Sessions auto-close after 5 minutes of inactivity as a safety net, but do not rely on this — close explicitly.",
+        "",
+        "Prefer wait_for_text/wait_for_idle over arbitrary sleeps. Prefer read_text over screenshot when you only need to check text content.",
       ].join("\n"),
     }
   );

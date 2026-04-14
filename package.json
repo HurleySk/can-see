@@ -1,6 +1,6 @@
 {
   "name": "can-see",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "mcpName": "io.github.HurleySk/can-see",
   "description": "MCP server that lets AI agents see and interact with terminal/CLI apps via virtual terminals and PNG screenshots",
   "type": "module",
