@@ -18,7 +18,6 @@ interface Frame {
 export class Recorder {
   private frames: Frame[] = [];
   private lastFrameTime = 0;
-  private startTime: number;
   private debounceTimer?: ReturnType<typeof setTimeout>;
   private maxTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
@@ -29,11 +28,10 @@ export class Recorder {
     private maxDurationMs: number = 60_000,
     private onAutoStop?: () => void,
   ) {
-    this.startTime = Date.now();
-
     // Auto-stop after max duration
     this.maxTimer = setTimeout(() => {
       if (!this.stopped) {
+        this.stopped = true;
         this.onAutoStop?.();
       }
     }, this.maxDurationMs);
@@ -44,7 +42,12 @@ export class Recorder {
    * or schedules one after the debounce interval.
    */
   onOutput(): void {
-    if (this.stopped || this.frames.length >= MAX_FRAMES) return;
+    if (this.stopped) return;
+    if (this.frames.length >= MAX_FRAMES) {
+      this.stopped = true;
+      this.onAutoStop?.();
+      return;
+    }
 
     const now = Date.now();
     const elapsed = now - this.lastFrameTime;

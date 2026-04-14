@@ -56,7 +56,7 @@ export function toHex(color: string): string {
  * `cell` must be an xterm IBufferCell.
  */
 export function resolveColor(
-  cell: { isFgDefault: () => number | boolean; isFgRGB: () => number | boolean; isFgPalette: () => number | boolean; getFgColor: () => number; isBgDefault: () => number | boolean; isBgRGB: () => number | boolean; isBgPalette: () => number | boolean; getBgColor: () => number },
+  cell: { isFgDefault: () => boolean; isFgRGB: () => boolean; isFgPalette: () => boolean; getFgColor: () => number; isBgDefault: () => boolean; isBgRGB: () => boolean; isBgPalette: () => boolean; getBgColor: () => number },
   type: "fg" | "bg",
 ): string {
   if (type === "fg") {

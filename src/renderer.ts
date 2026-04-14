@@ -2,7 +2,7 @@ import xtermHeadless from "@xterm/headless";
 const { Terminal } = xtermHeadless;
 type Terminal = InstanceType<typeof Terminal>;
 import { createCanvas } from "canvas";
-import { ANSI_COLORS, DEFAULT_BG, DEFAULT_FG, paletteColor, rgbColor } from "./colors.js";
+import { DEFAULT_BG, DEFAULT_FG, paletteColor, rgbColor } from "./colors.js";
 
 export const CELL_WIDTH = 9;
 export const CELL_HEIGHT = 18;
