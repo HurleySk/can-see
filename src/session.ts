@@ -46,6 +46,7 @@ export class Session {
   private exitCode?: number;
   private signal?: string;
   private lastActivity: number;
+  private lastOutput: number;
 
   constructor(command: string, args: string[], options: SessionOptions = {}) {
     this.sessionId = uuidv4();
@@ -55,6 +56,7 @@ export class Session {
     this.rows = options.rows ?? 30;
     this.createdAt = new Date().toISOString();
     this.lastActivity = Date.now();
+    this.lastOutput = Date.now();
 
     this.terminal = new Terminal({
       cols: this.cols,
@@ -72,6 +74,7 @@ export class Session {
     });
 
     this.ptyProcess.onData((data: string) => {
+      this.lastOutput = Date.now();
       this.terminal.write(data);
     });
 
@@ -123,6 +126,10 @@ export class Session {
 
   getLastActivity(): number {
     return this.lastActivity;
+  }
+
+  getLastOutput(): number {
+    return this.lastOutput;
   }
 
   close(): void {
