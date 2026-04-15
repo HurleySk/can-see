@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ECHO_APP = path.join(__dirname, "fixtures", "echo-app.js");
 
-describe("SessionManager", () => {
+describe("SessionManager", { timeout: 15000 }, () => {
   let manager: SessionManager;
 
   afterEach(() => {

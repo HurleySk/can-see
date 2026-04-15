@@ -4,7 +4,16 @@ const { Terminal } = xtermHeadless;
 type Terminal = InstanceType<typeof Terminal>;
 import { createCanvas, Image } from "canvas";
 import { renderTerminal, CELL_WIDTH, CELL_HEIGHT, PADDING } from "./renderer.js";
-import { GIFEncoder, quantize, applyPalette } from "gifenc";
+// gifenc is CJS with a `default` export key — ESM interop varies between
+// Node (default import = module.exports) and vitest (default import = module.exports.default).
+// Use createRequire for consistent behavior.
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { GIFEncoder, quantize, applyPalette } = require("gifenc") as {
+  GIFEncoder: () => { writeFrame(index: Uint8Array, width: number, height: number, opts?: { palette?: number[][]; delay?: number }): void; finish(): void; bytes(): Uint8Array };
+  quantize: (rgba: Uint8Array, maxColors: number) => number[][];
+  applyPalette: (rgba: Uint8Array, palette: number[][]) => Uint8Array;
+};
 
 const MAX_FRAMES = 300;
 
