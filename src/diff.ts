@@ -49,7 +49,7 @@ export function captureBuffer(terminal: Terminal): CellSnapshot[][] {
  * Compare two buffer snapshots cell-by-cell. Returns a highlight map
  * compatible with RenderOptions.highlights.
  */
-export function diffBuffers(before: CellSnapshot[][], after: CellSnapshot[][]): DiffResult {
+export function diffBuffers(before: CellSnapshot[][], after: CellSnapshot[][], excludeRows?: Set<number>): DiffResult {
   const highlights = new Map<string, string>();
   let changedCells = 0;
   let minRow = Infinity;
@@ -57,6 +57,7 @@ export function diffBuffers(before: CellSnapshot[][], after: CellSnapshot[][]): 
 
   const rows = Math.min(before.length, after.length);
   for (let row = 0; row < rows; row++) {
+    if (excludeRows?.has(row)) continue;
     const cols = Math.min(before[row].length, after[row].length);
     for (let col = 0; col < cols; col++) {
       const b = before[row][col];

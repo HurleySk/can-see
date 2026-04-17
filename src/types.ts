@@ -16,6 +16,7 @@ export interface LaunchParams {
   cwd?: string;
   cols?: number;
   rows?: number;
+  env?: Record<string, string>;
 }
 
 export interface ScreenshotResult {

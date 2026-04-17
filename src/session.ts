@@ -8,13 +8,16 @@ import path from "path";
 import { renderTerminal, type RenderOptions } from "./renderer.js";
 import { resolveColor } from "./colors.js";
 import { captureBuffer, diffBuffers, type CellSnapshot } from "./diff.js";
-import { Recorder } from "./recorder.js";
+import { Recorder, encodeGif, halveFrames, INLINE_SIZE_THRESHOLD, MAX_FRAME_HALVING_ATTEMPTS } from "./recorder.js";
+import fs from "fs";
+import os from "os";
 import type { SessionInfo } from "./types.js";
 
 export interface SessionOptions {
   cols?: number;
   rows?: number;
   cwd?: string;
+  env?: Record<string, string>;
 }
 
 /**
@@ -75,7 +78,7 @@ export class Session {
       cols: this.cols,
       rows: this.rows,
       cwd: options.cwd ?? process.cwd(),
-      env: process.env as Record<string, string>,
+      env: { ...process.env, ...options.env } as Record<string, string>,
     });
 
     this.ptyProcess.onData((data: string) => {
@@ -113,6 +116,10 @@ export class Session {
     return renderTerminal(this.terminal, { startRow, startCol, endRow, endCol });
   }
 
+  captureCurrentBuffer(): CellSnapshot[][] {
+    return captureBuffer(this.terminal);
+  }
+
   captureBaseline(): { rows: number; cols: number; cells: number } {
     this.lastActivity = Date.now();
     this.baseline = captureBuffer(this.terminal);
@@ -135,7 +142,7 @@ export class Session {
     return { png, changedCells: diff.changedCells, summary };
   }
 
-  getCellInfo(row: number, col: number, endCol?: number): object {
+  getCellInfo(row: number, col: number, endCol?: number, compact?: boolean): object {
     this.lastActivity = Date.now();
     const buffer = this.terminal.buffer.active;
     if (row < 0 || row >= this.rows || col < 0 || col >= this.cols) {
@@ -148,6 +155,13 @@ export class Session {
       // Single cell
       const cell = line.getCell(col);
       if (!cell) throw new Error(`No data at row ${row}, col ${col}`);
+      if (compact) {
+        return {
+          char: cell.getChars() || " ",
+          fg: resolveColor(cell, "fg"),
+          bold: !!cell.isBold(),
+        };
+      }
       return {
         char: cell.getChars() || " ",
         fg: resolveColor(cell, "fg"),
@@ -169,17 +183,25 @@ export class Session {
       const cell = line.getCell(c);
       const ch = cell?.getChars() || " ";
       text += ch;
-      cells.push({
-        char: ch,
-        fg: cell ? resolveColor(cell, "fg") : "#cccccc",
-        bg: cell ? resolveColor(cell, "bg") : "#1e1e1e",
-        bold: !!cell?.isBold(),
-        italic: !!cell?.isItalic(),
-        underline: !!cell?.isUnderline(),
-        inverse: !!cell?.isInverse(),
-        dim: !!cell?.isDim(),
-        strikethrough: !!cell?.isStrikethrough(),
-      });
+      if (compact) {
+        cells.push({
+          char: ch,
+          fg: cell ? resolveColor(cell, "fg") : "#cccccc",
+          bold: !!cell?.isBold(),
+        });
+      } else {
+        cells.push({
+          char: ch,
+          fg: cell ? resolveColor(cell, "fg") : "#cccccc",
+          bg: cell ? resolveColor(cell, "bg") : "#1e1e1e",
+          bold: !!cell?.isBold(),
+          italic: !!cell?.isItalic(),
+          underline: !!cell?.isUnderline(),
+          inverse: !!cell?.isInverse(),
+          dim: !!cell?.isDim(),
+          strikethrough: !!cell?.isStrikethrough(),
+        });
+      }
     }
     return { text, cells };
   }
@@ -206,11 +228,37 @@ export class Session {
     });
   }
 
-  stopRecording(): Buffer {
+  stopRecording(outputPath?: string): { type: "inline"; gif: Buffer; frameCount: number; durationMs: number } | { type: "file"; path: string; frameCount: number; sizeBytes: number; durationMs: number } {
     if (!this.recorder) throw new Error("No recording in progress");
-    const gif = this.recorder.stop();
+    let frames = this.recorder.stop();
     this.recorder = undefined;
-    return gif;
+
+    if (outputPath) {
+      const gif = encodeGif(frames);
+      const durationMs = frames.reduce((sum, f) => sum + f.delay, 0);
+      fs.writeFileSync(outputPath, gif);
+      return { type: "file", path: outputPath, frameCount: frames.length, sizeBytes: gif.length, durationMs };
+    }
+
+    let gif = encodeGif(frames);
+    if (gif.length <= INLINE_SIZE_THRESHOLD) {
+      const durationMs = frames.reduce((sum, f) => sum + f.delay, 0);
+      return { type: "inline", gif, frameCount: frames.length, durationMs };
+    }
+
+    for (let i = 0; i < MAX_FRAME_HALVING_ATTEMPTS; i++) {
+      frames = halveFrames(frames);
+      gif = encodeGif(frames);
+      if (gif.length <= INLINE_SIZE_THRESHOLD) {
+        const durationMs = frames.reduce((sum, f) => sum + f.delay, 0);
+        return { type: "inline", gif, frameCount: frames.length, durationMs };
+      }
+    }
+
+    const tmpPath = path.join(os.tmpdir(), `can-see-${Date.now()}.gif`);
+    fs.writeFileSync(tmpPath, gif);
+    const durationMs = frames.reduce((sum, f) => sum + f.delay, 0);
+    return { type: "file", path: tmpPath, frameCount: frames.length, sizeBytes: gif.length, durationMs };
   }
 
   findColor(targetHex: string, target: "fg" | "bg", row?: number, col?: number): { row: number; col: number } | null {
@@ -243,6 +291,20 @@ export class Session {
     return null;
   }
 
+  findTextInViewport(text: string): { row: number; col: number } | null {
+    this.lastActivity = Date.now();
+    const buffer = this.terminal.buffer.active;
+    for (let row = 0; row < this.rows; row++) {
+      const line = buffer.getLine(row);
+      if (line) {
+        const lineText = line.translateToString(true);
+        const col = lineText.indexOf(text);
+        if (col !== -1) return { row, col };
+      }
+    }
+    return null;
+  }
+
   getBufferText(): string {
     this.lastActivity = Date.now();
     const buffer = this.terminal.buffer.active;
@@ -268,6 +330,10 @@ export class Session {
       rows: this.rows,
       createdAt: this.createdAt,
     };
+  }
+
+  getPid(): number {
+    return this.ptyProcess.pid;
   }
 
   getLastActivity(): number {

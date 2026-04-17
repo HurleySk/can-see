@@ -6,6 +6,7 @@ import { SessionManager } from "./session-manager.js";
 import { resolveKeys } from "./keys.js";
 import { DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_IDLE_TIMEOUT_MS } from "./types.js";
 import { parseColor } from "./colors.js";
+import { diffBuffers } from "./diff.js";
 
 export function createServer(): McpServer {
   const cols = parseInt(process.env.DEFAULT_COLS ?? "", 10) || DEFAULT_COLS;
@@ -17,7 +18,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "can-see",
-      version: "0.3.2",
+      version: "0.5.0",
     },
     {
       instructions: [
@@ -52,6 +53,7 @@ export function createServer(): McpServer {
       cwd: z.string().optional().describe("Working directory"),
       cols: z.number().optional().describe(`Terminal columns (default: ${cols})`),
       rows: z.number().optional().describe(`Terminal rows (default: ${rows})`),
+      env: z.record(z.string(), z.string()).optional().describe("Environment variables to set (merged with server's environment)"),
     },
     async (params) => {
       try {
@@ -59,6 +61,7 @@ export function createServer(): McpServer {
           cols: params.cols ?? cols,
           rows: params.rows ?? rows,
           cwd: params.cwd,
+          env: params.env,
         });
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ sessionId }) }],
@@ -134,6 +137,44 @@ export function createServer(): McpServer {
   );
 
   server.tool(
+    "screenshot_text_region",
+    "Find text in the viewport and capture the surrounding area as a PNG. Searches visible viewport only (single-line match, returns first match top-to-bottom).",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      containingText: z.string().describe("Text to find in the viewport"),
+      paddingRows: z.number().optional().describe("Rows of context above and below the matched row (default: 2)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const match = session.findTextInViewport(params.containingText);
+        if (!match) {
+          return {
+            content: [{ type: "text" as const, text: `Text "${params.containingText}" not found in viewport` }],
+            isError: true,
+          };
+        }
+
+        const padding = params.paddingRows ?? 2;
+        const info = session.getInfo();
+        const startRow = Math.max(0, match.row - padding);
+        const endRow = Math.min(info.rows, match.row + padding + 1);
+        const png = session.screenshotRegion(startRow, 0, endRow, info.cols);
+
+        return {
+          content: [
+            { type: "text" as const, text: `Found at row ${match.row}, col ${match.col} — capturing rows ${startRow}-${endRow - 1}` },
+            { type: "image" as const, data: png.toString("base64"), mimeType: "image/png" },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
     "capture_baseline",
     "Snapshot current terminal state for later diff comparison (screenshot also auto-captures a baseline)",
     {
@@ -188,11 +229,12 @@ export function createServer(): McpServer {
       row: z.number().describe("Row, 0-based, viewport-relative"),
       col: z.number().describe("Column, 0-based"),
       endCol: z.number().optional().describe("End column (exclusive) for range query"),
+      compact: z.boolean().optional().describe("When true, return only {char, fg, bold} per cell — reduces noise for color-checking workflows"),
     },
     async (params) => {
       try {
         const session = manager.get(params.sessionId);
-        const info = session.getCellInfo(params.row, params.col, params.endCol);
+        const info = session.getCellInfo(params.row, params.col, params.endCol, params.compact);
         return { content: [{ type: "text" as const, text: JSON.stringify(info, null, 2) }] };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -247,21 +289,44 @@ export function createServer(): McpServer {
 
   server.tool(
     "stop_recording",
-    "Stop recording and return the captured frames as an animated GIF",
+    "Stop recording and return the captured frames as an animated GIF. If the GIF exceeds the inline size limit (~4MB), frames are automatically trimmed. If still too large, the GIF is saved to a temp file and the path is returned. Use outputPath to always save to a specific file.",
     {
       sessionId: z.string().describe("Session ID from launch"),
+      outputPath: z.string().optional().describe("File path to save the GIF to. If omitted, returns inline (with automatic fallback to temp file if GIF exceeds size limit)"),
     },
     async (params) => {
       try {
         const session = manager.get(params.sessionId);
-        const gif = session.stopRecording();
-        return {
-          content: [{
-            type: "image" as const,
-            data: gif.toString("base64"),
-            mimeType: "image/gif",
-          }],
-        };
+        const result = session.stopRecording(params.outputPath);
+
+        if (result.type === "inline") {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ frameCount: result.frameCount, durationMs: result.durationMs }),
+              },
+              {
+                type: "image" as const,
+                data: result.gif.toString("base64"),
+                mimeType: "image/gif",
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                savedTo: result.path,
+                frameCount: result.frameCount,
+                sizeBytes: result.sizeBytes,
+                durationMs: result.durationMs,
+                note: "GIF exceeded inline size limit. Use the file system to read this file.",
+              }),
+            }],
+          };
+        }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         return { content: [{ type: "text" as const, text: message }], isError: true };
@@ -320,6 +385,10 @@ export function createServer(): McpServer {
             return { content: [{ type: "text" as const, text: `Found "${params.text}" after ${Date.now() - start}ms` }] };
           }
           if (session.getInfo().status === "exited") {
+            // Final check: text may have arrived with the last output before exit
+            if (session.getBufferText().includes(params.text)) {
+              return { content: [{ type: "text" as const, text: `Found "${params.text}" after ${Date.now() - start}ms (process exited)` }] };
+            }
             return {
               content: [{ type: "text" as const, text: `Process exited before "${params.text}" appeared` }],
               isError: true,
@@ -341,18 +410,99 @@ export function createServer(): McpServer {
 
   server.tool(
     "wait_for_idle",
-    "Wait until terminal output has been stable for a given duration (use after send_keys when you don't know what text to expect)",
+    "Wait until terminal output has been stable for a given duration. Use idleMs (default) for apps that stop producing output, or stableMs for apps with constant output like timers/spinners — stableMs compares buffer content instead of tracking raw PTY data.",
     {
       sessionId: z.string().describe("Session ID from launch"),
-      idleMs: z.number().optional().describe("Required idle duration in ms (default: 500)"),
+      idleMs: z.number().optional().describe("Required idle duration in ms (default: 500). Tracks time since last PTY output."),
+      stableMs: z.number().optional().describe("Content-stable duration in ms. When set, compares buffer snapshots instead of tracking raw PTY output — use this for apps with timers/spinners."),
+      excludeRows: z.array(z.number().int()).optional().describe("Row numbers (0-based) to ignore during content-stable comparison (only applies with stableMs)"),
+      excludePattern: z.string().optional().describe("Regex pattern — rows containing matching text are excluded from stability comparison (only applies with stableMs). More robust than excludeRows for dynamic content like timers."),
       timeoutMs: z.number().optional().describe("Timeout in milliseconds (default: 30000)"),
     },
     async (params) => {
       try {
         const session = manager.get(params.sessionId);
-        const idleMs = params.idleMs ?? 500;
         const timeout = params.timeoutMs ?? 30_000;
         const start = Date.now();
+
+        if (params.stableMs !== undefined && params.idleMs !== undefined) {
+          return {
+            content: [{ type: "text" as const, text: "Cannot use both stableMs and idleMs — they are mutually exclusive modes" }],
+            isError: true,
+          };
+        }
+
+        if (params.stableMs !== undefined) {
+          // Content-stable mode: compare buffer snapshots
+          const stableMs = params.stableMs;
+          const baseExcludeRows = params.excludeRows ? new Set(params.excludeRows) : new Set<number>();
+
+          let excludeRegex: RegExp | undefined;
+          if (params.excludePattern) {
+            try {
+              excludeRegex = new RegExp(params.excludePattern);
+            } catch (e) {
+              return {
+                content: [{ type: "text" as const, text: `Invalid excludePattern regex: ${(e as Error).message}` }],
+                isError: true,
+              };
+            }
+          }
+
+          let previousSnapshot = session.captureCurrentBuffer();
+          let stableStartTime: number | null = null;
+
+          while (Date.now() - start < timeout) {
+            await new Promise((r) => setTimeout(r, 100));
+
+            const currentSnapshot = session.captureCurrentBuffer();
+
+            // Build dynamic exclude set: merge explicit rows with pattern-matched rows
+            let excludeRowSet: Set<number> | undefined = baseExcludeRows.size > 0 ? new Set(baseExcludeRows) : undefined;
+            if (excludeRegex) {
+              excludeRowSet = excludeRowSet ?? new Set<number>();
+              for (let row = 0; row < currentSnapshot.length; row++) {
+                const rowText = currentSnapshot[row].map(c => c.char).join("");
+                if (excludeRegex.test(rowText)) {
+                  excludeRowSet.add(row);
+                }
+              }
+            }
+
+            const diff = diffBuffers(previousSnapshot, currentSnapshot, excludeRowSet);
+
+            if (diff.changedCells === 0) {
+              if (stableStartTime === null) stableStartTime = Date.now();
+              const stableElapsed = Date.now() - stableStartTime;
+              if (stableElapsed >= stableMs) {
+                return { content: [{ type: "text" as const, text: `Terminal content stable for ${stableElapsed}ms (waited ${Date.now() - start}ms total)` }] };
+              }
+            } else {
+              previousSnapshot = currentSnapshot;
+              stableStartTime = null;
+            }
+
+            if (session.getInfo().status === "exited") {
+              const finalSnapshot = session.captureCurrentBuffer();
+              const finalDiff = diffBuffers(previousSnapshot, finalSnapshot, excludeRowSet);
+              if (finalDiff.changedCells === 0 && stableStartTime !== null) {
+                const finalElapsed = Date.now() - stableStartTime;
+                if (finalElapsed >= stableMs) {
+                  return { content: [{ type: "text" as const, text: `Terminal content stable for ${finalElapsed}ms (process exited)` }] };
+                }
+              }
+              return { content: [{ type: "text" as const, text: `Process exited before content was stable for ${stableMs}ms` }] };
+            }
+          }
+
+          return {
+            content: [{ type: "text" as const, text: `Timed out after ${timeout}ms waiting for ${stableMs}ms of content stability` }],
+            isError: true,
+          };
+        }
+
+        // Default idleMs mode: track time since last PTY output
+        const idleMs = params.idleMs ?? 500;
 
         while (Date.now() - start < timeout) {
           const elapsed = Date.now() - session.getLastOutput();
@@ -360,7 +510,6 @@ export function createServer(): McpServer {
             return { content: [{ type: "text" as const, text: `Terminal idle for ${elapsed}ms (waited ${Date.now() - start}ms total)` }] };
           }
           if (session.getInfo().status === "exited") {
-            // Process exited — check one more time if idle threshold is met
             const finalElapsed = Date.now() - session.getLastOutput();
             if (finalElapsed >= idleMs) {
               return { content: [{ type: "text" as const, text: `Terminal idle for ${finalElapsed}ms (process exited)` }] };
@@ -407,6 +556,11 @@ export function createServer(): McpServer {
             return { content: [{ type: "text" as const, text: `Found ${params.color} (${targetHex}) at row ${found.row}, col ${found.col} after ${Date.now() - start}ms` }] };
           }
           if (session.getInfo().status === "exited") {
+            // Final check: color may have appeared in the last output before exit
+            const finalCheck = session.findColor(targetHex, colorTarget, params.row, params.col);
+            if (finalCheck) {
+              return { content: [{ type: "text" as const, text: `Found ${params.color} (${targetHex}) at row ${finalCheck.row}, col ${finalCheck.col} after ${Date.now() - start}ms (process exited)` }] };
+            }
             return {
               content: [{ type: "text" as const, text: `Process exited before color "${params.color}" appeared` }],
               isError: true,
@@ -417,6 +571,43 @@ export function createServer(): McpServer {
 
         return {
           content: [{ type: "text" as const, text: `Timed out after ${timeout}ms waiting for color "${params.color}"` }],
+          isError: true,
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    "wait_for_exit",
+    "Wait until the process exits and return its exit code and signal",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+      timeoutMs: z.number().optional().describe("Timeout in milliseconds (default: 30000)"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const info = session.getInfo();
+        if (info.status === "exited") {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ exitCode: info.exitCode ?? null, signal: info.signal ?? null }) }] };
+        }
+
+        const timeout = params.timeoutMs ?? 30_000;
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+          await new Promise((r) => setTimeout(r, 100));
+          const current = session.getInfo();
+          if (current.status === "exited") {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ exitCode: current.exitCode ?? null, signal: current.signal ?? null }) }] };
+          }
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Timed out after ${timeout}ms waiting for process to exit` }],
           isError: true,
         };
       } catch (err: unknown) {
@@ -466,6 +657,30 @@ export function createServer(): McpServer {
   );
 
   server.tool(
+    "get_process_status",
+    "Get the current process status — use to distinguish 'app is idle' from 'app has exited'",
+    {
+      sessionId: z.string().describe("Session ID from launch"),
+    },
+    async (params) => {
+      try {
+        const session = manager.get(params.sessionId);
+        const info = session.getInfo();
+        const result: { running: boolean; pid: number; exitCode?: number; signal?: string } = {
+          running: info.status === "running",
+          pid: session.getPid(),
+        };
+        if (info.exitCode !== undefined) result.exitCode = info.exitCode;
+        if (info.signal !== undefined) result.signal = info.signal;
+        return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
     "list_sessions",
     "List all active terminal sessions",
     {},
@@ -489,6 +704,16 @@ export function createServer(): McpServer {
         const message = err instanceof Error ? err.message : String(err);
         return { content: [{ type: "text" as const, text: message }], isError: true };
       }
+    }
+  );
+
+  server.tool(
+    "close_all",
+    "Kill all active sessions at once. Useful for cleanup between test runs or when sessions may have been orphaned.",
+    {},
+    async () => {
+      const closed = manager.closeAllSessions();
+      return { content: [{ type: "text" as const, text: JSON.stringify({ closed }) }] };
     }
   );
 

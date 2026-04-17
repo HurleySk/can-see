@@ -62,4 +62,27 @@ describe("SessionManager", { timeout: 15000 }, () => {
     manager.sweepIdle();
     expect(manager.list()).toHaveLength(0);
   });
+
+  it("closeAllSessions closes all sessions and returns count", () => {
+    manager = new SessionManager();
+    manager.launch("node", [ECHO_APP]);
+    manager.launch("node", [ECHO_APP]);
+    manager.launch("node", [ECHO_APP]);
+    expect(manager.list()).toHaveLength(3);
+
+    const closed = manager.closeAllSessions();
+    expect(closed).toBe(3);
+    expect(manager.list()).toHaveLength(0);
+  });
+
+  it("closeAllSessions leaves manager functional for future launches", () => {
+    manager = new SessionManager();
+    manager.launch("node", [ECHO_APP]);
+    manager.closeAllSessions();
+
+    // Manager should still work after closeAllSessions
+    const newId = manager.launch("node", [ECHO_APP]);
+    expect(manager.list()).toHaveLength(1);
+    expect(manager.get(newId)).toBeTruthy();
+  });
 });

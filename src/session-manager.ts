@@ -45,11 +45,17 @@ export class SessionManager {
     this.sessions.delete(sessionId);
   }
 
-  closeAll(): void {
+  closeAllSessions(): number {
+    const count = this.sessions.size;
     for (const session of this.sessions.values()) {
       try { session.close(); } catch {}
     }
     this.sessions.clear();
+    return count;
+  }
+
+  closeAll(): void {
+    this.closeAllSessions();
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
     }

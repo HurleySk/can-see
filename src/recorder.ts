@@ -16,8 +16,10 @@ const { GIFEncoder, quantize, applyPalette } = require("gifenc") as {
 };
 
 const MAX_FRAMES = 300;
+export const INLINE_SIZE_THRESHOLD = 4_000_000; // ~5.3MB after base64 encoding
+export const MAX_FRAME_HALVING_ATTEMPTS = 2;
 
-interface Frame {
+export interface Frame {
   pixels: Uint8Array;
   delay: number; // ms
   width: number;
@@ -105,10 +107,9 @@ export class Recorder {
   }
 
   /**
-   * Finalize recording and encode all frames as an animated GIF.
-   * Returns the GIF as a Buffer.
+   * Finalize recording and return captured frames.
    */
-  stop(): Buffer {
+  stop(): Frame[] {
     this.stopped = true;
     this.dispose();
 
@@ -116,18 +117,7 @@ export class Recorder {
       this.captureFrame();
     }
 
-    const width = this.frames[0].width;
-    const height = this.frames[0].height;
-    const gif = GIFEncoder();
-
-    for (const frame of this.frames) {
-      const palette = quantize(frame.pixels, 256);
-      const indexed = applyPalette(frame.pixels, palette);
-      gif.writeFrame(indexed, width, height, { palette, delay: frame.delay });
-    }
-
-    gif.finish();
-    return Buffer.from(gif.bytes());
+    return [...this.frames];
   }
 
   getFrameCount(): number {
@@ -144,4 +134,37 @@ export class Recorder {
       this.maxTimer = undefined;
     }
   }
+}
+
+/**
+ * Encode an array of frames as an animated GIF.
+ */
+export function encodeGif(frames: Frame[]): Buffer {
+  if (frames.length === 0) {
+    throw new Error("Cannot encode GIF with zero frames");
+  }
+  const width = frames[0].width;
+  const height = frames[0].height;
+  const gif = GIFEncoder();
+
+  for (const frame of frames) {
+    if (frame.width !== width || frame.height !== height) {
+      throw new Error(`Frame size mismatch: expected ${width}x${height}, got ${frame.width}x${frame.height}`);
+    }
+    const palette = quantize(frame.pixels, 256);
+    const indexed = applyPalette(frame.pixels, palette);
+    gif.writeFrame(indexed, width, height, { palette, delay: frame.delay });
+  }
+
+  gif.finish();
+  return Buffer.from(gif.bytes());
+}
+
+/**
+ * Drop every other frame, doubling delays to preserve timing.
+ */
+export function halveFrames(frames: Frame[]): Frame[] {
+  return frames
+    .filter((_, i) => i % 2 === 0)
+    .map((f) => ({ ...f, delay: Math.min(f.delay * 2, 1000) }));
 }
