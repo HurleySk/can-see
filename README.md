@@ -1,5 +1,10 @@
 # can-see
 
+[![npm version](https://img.shields.io/npm/v/can-see)](https://www.npmjs.com/package/can-see)
+[![npm downloads](https://img.shields.io/npm/dm/can-see)](https://www.npmjs.com/package/can-see)
+[![license](https://img.shields.io/npm/l/can-see)](https://github.com/HurleySk/can-see/blob/master/LICENSE)
+[![node](https://img.shields.io/node/v/can-see)](https://nodejs.org)
+
 MCP server that lets AI agents **see** and **interact** with terminal/CLI applications through virtual terminals and PNG screenshots.
 
 Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and any MCP-compatible agent.

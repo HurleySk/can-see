@@ -3,3 +3,5 @@ dist/
 *.tgz
 .npmrc
 .mcpregistry_*
+docs/reddit-post-draft.md
+docs/directory-submissions.md
